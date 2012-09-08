@@ -459,6 +459,7 @@ DMALLOC_PNT	valloc(DMALLOC_SIZE size);
  *
  * string -> String we are duplicating.
  */
+#undef strdup
 extern
 char	*strdup(const char *string);
 #endif /* ifndef DMALLOC_STRDUP_MACRO */
