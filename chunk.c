@@ -934,7 +934,7 @@ static	void	get_pnt_info(const skip_alloc_t *slot_p, pnt_info_t *info_p)
   
   if (info_p->pi_fence_b) {
     info_p->pi_fence_top = info_p->pi_user_bounds;
-    info_p->pi_upper_bounds = (char *)info_p->pi_fence_top;
+    info_p->pi_upper_bounds = (char *)info_p->pi_alloc_bounds - FENCE_TOP_SIZE;
   }
   else {
     info_p->pi_fence_top = NULL;
