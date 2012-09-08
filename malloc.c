@@ -1030,7 +1030,9 @@ int	dmalloc_free(const char *file, const int line, DMALLOC_PNT pnt,
 		     const int func_id)
 {
   int		ret;
-  
+  if(NULL==pnt)
+    return FREE_NOERROR;
+
   if (! dmalloc_in(file, line, 1)) {
     if (tracking_func != NULL) {
       tracking_func(file, line, func_id, 0, 0, pnt, NULL);
