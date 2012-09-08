@@ -3945,6 +3945,10 @@ static	void	track_alloc_trxn(const char *file, const unsigned int line,
     (void)printf("%s memalign %d bytes alignment %d got %#lx\n",
 		 file_line, byte_size, alignment, (long)new_addr);
     break;
+  case DMALLOC_FUNC_POSIX_MEMALIGN:
+    (void)printf("%s posix_memalign %d bytes alignment %d got %#lx\n",
+		 file_line, byte_size, alignment, (long)new_addr);
+    break;
   case DMALLOC_FUNC_VALLOC:
     (void)printf("%s valloc %d bytes alignment %d got %#lx\n",
 		 file_line, byte_size, alignment, (long)new_addr);

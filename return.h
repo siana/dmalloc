@@ -94,7 +94,50 @@
 /*************************************/
 
 /* for i[34]86 machines with GCC */
-#if __i386 && __GNUC__ > 1
+/*assembly... blechhh.. the first opcode segfaults dmalloc_fc_t -s... somewhere in the argument checking*/
+/*
+Dump of assembler code for function malloc:
+   0x08053870 <+0>:     sub    esp,0x2c
+=> 0x08053873 <+3>:     mov    eax,DWORD PTR [ebp+0x4]
+   0x08053876 <+6>:     mov    edx,eax
+   
+   
+
+(gdb) backtrace
+#0  malloc (size=8) at malloc.c:1226
+#1  0x0804f906 in argv_process_no_env (args=0x805f120, arg_n=2, 
+    argv=0xbffffcc4) at dmalloc_argv.c:3201
+#2  0x0804fc61 in argv_process (args=0x805f120, argc=2, argv=0xbffffcc4)
+    at dmalloc_argv.c:3290
+#3  0x080496e6 in main (argc=2, argv=0xbffffcc4) at dmalloc_fc_t.c:1078
+
+(gdb) info registers
+eax            0x8      8
+ecx            0x805f770        134608752
+edx            0x7b     123
+ebx            0x0      0
+esp            0xbffffb20       0xbffffb20
+ebp            0x14     0x14
+esi            0xf7fa0ee0       -134607136
+edi            0x805f138        134607160
+eip            0x8053873        0x8053873 <malloc+3>
+eflags         0x10282  [ SF IF RF ]
+cs             0x73     115
+ss             0x7b     123
+ds             0x7b     123
+es             0x7b     123
+fs             0x0      0
+gs             0x33     51
+
+turns out ebp is never written...
+I wonder if it might be that -fstack_protector
+gcc version  (Debian 4.6.2-11)
+changing to use __builtin_
+*/
+#if __i386 && __GNUC__ > 3
+#define GET_RET_ADDR(file)	((file)=(char *)__builtin_return_address(0))
+
+#elif __i386 && __GNUC__ > 1
 
 #define GET_RET_ADDR(file)	asm("movl 4(%%ebp),%%eax ; movl %%eax,%0" : \
 				    "=g" (file) : \

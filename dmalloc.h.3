@@ -41,15 +41,16 @@
 #define DMALLOC_FUNC_REALLOC	12	/* realloc function called */
 #define DMALLOC_FUNC_RECALLOC	13	/* recalloc called */
 #define DMALLOC_FUNC_MEMALIGN	14	/* memalign function called */
-#define DMALLOC_FUNC_VALLOC	15	/* valloc function called */
-#define DMALLOC_FUNC_STRDUP	16	/* strdup function called */
-#define DMALLOC_FUNC_FREE	17	/* free function called */
-#define DMALLOC_FUNC_CFREE	18	/* cfree function called */
+#define DMALLOC_FUNC_POSIX_MEMALIGN	15	/* memalign function called */
+#define DMALLOC_FUNC_VALLOC	16	/* valloc function called */
+#define DMALLOC_FUNC_STRDUP	17	/* strdup function called */
+#define DMALLOC_FUNC_FREE	18	/* free function called */
+#define DMALLOC_FUNC_CFREE	19	/* cfree function called */
 
-#define DMALLOC_FUNC_NEW	20	/* new function called */
-#define DMALLOC_FUNC_NEW_ARRAY	21	/* new[] function called */
-#define DMALLOC_FUNC_DELETE	22	/* delete function called */
-#define DMALLOC_FUNC_DELETE_ARRAY 23	/* delete[] function called */
+#define DMALLOC_FUNC_NEW	21	/* new function called */
+#define DMALLOC_FUNC_NEW_ARRAY	22	/* new[] function called */
+#define DMALLOC_FUNC_DELETE	23	/* delete function called */
+#define DMALLOC_FUNC_DELETE_ARRAY 24	/* delete[] function called */
 
 #ifdef __cplusplus
 extern "C" {
@@ -148,6 +149,52 @@ DMALLOC_PNT	dmalloc_malloc(const char *file, const int line,
 			       const DMALLOC_SIZE alignment,
 			       const int xalloc_b);
 
+extern
+DMALLOC_PNT	dmalloc_malloc_real(const char *file, const int line,
+			       const DMALLOC_SIZE size, const int func_id,
+			       const DMALLOC_SIZE alignment,
+			       const int xalloc_b);
+
+/*
+ * int dmalloc_posix_memalign
+ *
+ * DESCRIPTION:
+ *
+ * Overloading the posix_memalign(3) function.  Allocate and return a memory
+ * block of a certain size which has been aligned to a certain
+ * alignment.
+ *
+ * RETURNS:
+ *
+ * Success - zero.
+ * EINVAL The alignment argument was not a power of two, or was not a multiple of sizeof(void *).
+ * ENOMEM There was insufficient memory to fulfill the allocation request.
+ * 
+ *
+ * ARGUMENTS:
+ * memptr -> pointer will be returned here on success
+ *
+ * alignment -> Value to which the allocation must be aligned.  This
+ * should probably be a multiple of 2 with a maximum value equivalent
+ * to the block-size which is often 1k or 4k.
+ *
+ * size -> Number of bytes requested.
+ *
+ * file -> File-name or return-address of the caller.
+ *
+ * line -> Line-number of the caller.
+ *
+ * func_id -> Function-id to identify the type of call.  See
+ * dmalloc.h.
+ *
+ * xalloc_b -> If set to 1 then print an error and exit if we run out
+ * of memory.
+ */
+extern
+int	dmalloc_posix_memalign(const char *file, const int line, DMALLOC_PNT *memptr,
+			       const DMALLOC_SIZE size, const int func_id,
+			       const DMALLOC_SIZE alignment,
+			       const int xalloc_b);
 /*
  * DMALLOC_PNT dmalloc_realloc
  *
@@ -182,6 +229,10 @@ extern
 DMALLOC_PNT	dmalloc_realloc(const char *file, const int line,
 				DMALLOC_PNT old_pnt, DMALLOC_SIZE new_size,
 				const int func_id, const int xalloc_b);
+extern
+DMALLOC_PNT	dmalloc_realloc_real(const char *file, const int line,
+				DMALLOC_PNT old_pnt, DMALLOC_SIZE new_size,
+				const int func_id, const int xalloc_b);
 
 /*
  * int dmalloc_free
@@ -212,6 +263,9 @@ DMALLOC_PNT	dmalloc_realloc(const char *file, const int line,
  */
 extern
 int	dmalloc_free(const char *file, const int line, DMALLOC_PNT pnt,
+		     const int func_id);
+extern
+int	dmalloc_free_real(const char *file, const int line, DMALLOC_PNT pnt,
 		     const int func_id);
 
 /*
@@ -1030,10 +1084,14 @@ const char	*dmalloc_strerror(const int error_num);
 #define memalign(alignment, size) \
   dmalloc_malloc(__FILE__, __LINE__, (size), DMALLOC_FUNC_MEMALIGN, \
 		 (alignment), 0 /* no xalloc */)
+#undef posix_memalign
+#define posix_memalign(memptr,alignment, size) \
+  dmalloc_posix_memalign(__FILE__, __LINE__, (memptr), (size), DMALLOC_FUNC_POSIX_MEMALIGN, \
+		 (alignment), 0 /* no xalloc */)
 #undef valloc
 #define valloc(size) \
   dmalloc_malloc(__FILE__, __LINE__, (size), DMALLOC_FUNC_VALLOC, \
-		0 /* special case */, 0 /* no xalloc */)
+		BLOCK_SIZE, 0 /* no xalloc */)
 #ifndef DMALLOC_STRDUP_MACRO
 #undef strdup
 #define strdup(str) \

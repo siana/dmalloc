@@ -38,6 +38,20 @@
 # include <unistd.h>				/* for write */
 #endif
 
+#if HAVE_ERRNO_H
+# include <errno.h>				/* for ENOMEM EINVAL */
+#else
+
+#ifndef ENOMEM
+#define ENOMEM 1
+#endif /*ENOMEM*/
+
+#ifndef EINVAL
+#define EINVAL 2
+#endif /*EINVAL*/
+
+#endif /*HAVE_ERRNO_H*/
+
 /*
  * cygwin includes
  */
@@ -719,6 +733,12 @@ void	__fini_dmalloc(void)
 }
 #endif
 
+
+static int is_aligned_to(const char * rv,const DMALLOC_SIZE alignment)
+{
+	return 0==(((DMALLOC_SIZE)rv)%alignment);//alignment must not be zero
+}
+
 /*
  * DMALLOC_PNT dmalloc_malloc
  *
@@ -750,6 +770,41 @@ void	__fini_dmalloc(void)
  * of memory.
  */
 DMALLOC_PNT	dmalloc_malloc(const char *file, const int line,
+			       const DMALLOC_SIZE size, const int func_id,
+			       const DMALLOC_SIZE alignment,
+			       const int xalloc_b)
+{
+	DMALLOC_SIZE align=(alignment==0)?1:alignment;//0==bad
+	DMALLOC_SIZE overhead=align-1+sizeof(DMALLOC_SIZE);
+	DMALLOC_SIZE offset=0,sz;
+	DMALLOC_PNT base;
+	char * rv;
+
+	sz=size+overhead;
+#if ALLOW_ALLOC_ZERO_SIZE == 0
+	if (size == 0) {
+		sz=0;
+	}
+#endif
+
+	base=dmalloc_malloc_real(file, line, sz,  func_id, 0, xalloc_b);
+	rv=base;
+
+	if(NULL==rv)
+		return NULL;
+	/*byte addressable?*/
+	while(! is_aligned_to(rv+sizeof(offset),align))
+	{
+		offset++;
+		rv++;
+	}
+	
+	memmove(rv,&offset,sizeof(offset));
+	rv+=sizeof(offset);
+	return rv;
+}
+
+DMALLOC_PNT	dmalloc_malloc_real(const char *file, const int line,
 			       const DMALLOC_SIZE size, const int func_id,
 			       const DMALLOC_SIZE alignment,
 			       const int xalloc_b)
@@ -825,12 +880,79 @@ DMALLOC_PNT	dmalloc_malloc(const char *file, const int line,
   return new_p;
 }
 
+
+static int power_of_two(DMALLOC_SIZE v)
+{
+	unsigned i;
+	for(i=0;i<(sizeof(v)*8);i++) {
+		if((((DMALLOC_SIZE)1)<<i)==v)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * int dmalloc_posix_memalign
+ *
+ * DESCRIPTION:
+ *
+ * Overloading the posix_memalign(3) function.  Allocate and return a memory
+ * block of a certain size which has been aligned to a certain
+ * alignment.
+ *
+ * RETURNS:
+ *
+ * Success - zero.
+ * EINVAL The alignment argument was not a power of two, or was not a multiple of sizeof(void *).
+ * ENOMEM There was insufficient memory to fulfill the allocation request.
+ *
+ * ARGUMENTS:
+ * memptr -> pointer will be returned here on success
+ *
+ * alignment -> Value to which the allocation must be aligned.  This
+ * should probably be a multiple of 2 with a maximum value equivalent
+ * to the block-size which is often 1k or 4k.
+ *
+ * size -> Number of bytes requested.
+ *
+ * file -> File-name or return-address of the caller.
+ *
+ * line -> Line-number of the caller.
+ *
+ * func_id -> Function-id to identify the type of call.  See
+ * dmalloc.h.
+ *
+ * xalloc_b -> If set to 1 then print an error and exit if we run out
+ * of memory.
+ */
+extern
+int	dmalloc_posix_memalign(const char *file, const int line, DMALLOC_PNT *memptr,
+			       const DMALLOC_SIZE size, const int func_id,
+			       const DMALLOC_SIZE alignment,
+			       const int xalloc_b)
+{
+	DMALLOC_PNT rv;
+  if((NULL==memptr)||(!power_of_two(alignment))||(alignment<sizeof(void*)))
+    return EINVAL;
+  
+	rv=dmalloc_malloc(file, line,size, func_id, alignment, xalloc_b);
+	if(NULL==rv)
+		return ENOMEM;
+	*memptr=rv;
+	return 0;
+}
+
+extern
+DMALLOC_PNT _dmalloc_chunk_get_baseptr(DMALLOC_PNT p);
+
+
 /*
  * DMALLOC_PNT dmalloc_realloc
  *
  * DESCRIPTION:
  *
  * Resizes and old pointer to a new number of bytes.
+ * Will destroy previous alignment.
  *
  * RETURNS:
  *
@@ -855,7 +977,69 @@ DMALLOC_PNT	dmalloc_malloc(const char *file, const int line,
  * xalloc_b -> If set to 1 then print an error and exit if we run out
  * of memory.
  */
+
 DMALLOC_PNT	dmalloc_realloc(const char *file, const int line,
+				DMALLOC_PNT old_p, DMALLOC_SIZE new_size,
+				const int func_id, const int xalloc_b)
+{
+	DMALLOC_PNT old_pnt=NULL;
+	DMALLOC_PNT new_pnt=NULL;
+	DMALLOC_SIZE old_offs=0,offs=0,nsz=0;//no alignment
+
+	if(NULL!=old_p) {
+		old_pnt=_dmalloc_chunk_get_baseptr(old_p);
+		memmove(&old_offs,old_p-sizeof(old_offs),sizeof(old_offs));
+	}
+	
+	nsz=new_size+sizeof(offs)+old_offs;
+
+	//hope I got those right now..
+	if(0==new_size) {
+
+#if ALLOW_REALLOC_SIZE_ZERO
+		nsz=0;
+#else
+#if ALLOW_ALLOC_ZERO_SIZE == 0
+		nsz=0;
+#else
+		nsz=sizeof(offs);
+#endif
+#endif
+	}
+	/*
+	something like this..
+	if((0==ALLOW_ALLOC_ZERO_SIZE)&&(1==ALLOW_REALLOC_SIZE_ZERO)&&(0==new_size))
+	{
+	//dmalloc_chunk_free
+	}
+	if((1==ALLOW_ALLOC_ZERO_SIZE)&&(1==ALLOW_REALLOC_SIZE_ZERO)&&(0==new_size))
+	{
+	//dmalloc_chunk_free
+	}
+	if((0==ALLOW_ALLOC_ZERO_SIZE)&&(0==ALLOW_REALLOC_SIZE_ZERO)&&(0==new_size))
+	{
+	//should generate error (and we get a NULL back)... the same as dmalloc_chunk_free, but no free
+	}
+	if((1==ALLOW_ALLOC_ZERO_SIZE)&&(0==ALLOW_REALLOC_SIZE_ZERO)&&(0==new_size))
+	{
+	//allocate a min sized block(offset should fit)
+	}
+	*/
+	
+
+
+	new_pnt=dmalloc_realloc_real(file, line, old_pnt, nsz,
+				func_id, xalloc_b);
+	if(NULL==new_pnt)
+		return NULL;
+	
+	memmove(new_pnt,&offs,sizeof(offs));
+	if((0!=old_offs)&&(0!=new_size))
+		memmove(new_pnt+sizeof(offs),new_pnt+sizeof(offs)+old_offs,new_size);
+	return new_pnt+sizeof(offs);
+}
+
+DMALLOC_PNT	dmalloc_realloc_real(const char *file, const int line,
 				DMALLOC_PNT old_pnt, DMALLOC_SIZE new_size,
 				const int func_id, const int xalloc_b)
 {
@@ -932,6 +1116,7 @@ DMALLOC_PNT	dmalloc_realloc(const char *file, const int line,
   return new_p;
 }
 
+
 /*
  * int dmalloc_free
  *
@@ -960,6 +1145,14 @@ DMALLOC_PNT	dmalloc_realloc(const char *file, const int line,
  * dmalloc.h.
  */
 int	dmalloc_free(const char *file, const int line, DMALLOC_PNT pnt,
+		     const int func_id)
+{
+	DMALLOC_PNT p;
+	p=_dmalloc_chunk_get_baseptr(pnt);
+	return dmalloc_free_real(file,line,p,func_id);
+}
+
+int	dmalloc_free_real(const char *file, const int line, DMALLOC_PNT pnt,
 		     const int func_id)
 {
   int		ret;
@@ -1209,6 +1402,40 @@ DMALLOC_PNT	memalign(DMALLOC_SIZE alignment, DMALLOC_SIZE size)
 			0 /* no xalloc messages */);
 }
 
+
+/*
+ * int posix_memalign
+ *
+ * DESCRIPTION:
+ *
+ * Overloading the posix_memalign(3) function.  Allocate and return a memory
+ * block of a certain size which has been aligned to a certain
+ * alignment.
+ *
+ * RETURNS:
+ *
+ * Success - zero.
+ * EINVAL The alignment argument was not a power of two, or was not a multiple of sizeof(void *).
+ * ENOMEM There was insufficient memory to fulfill the allocation request.
+ * 
+ *
+ * ARGUMENTS:
+ * memptr -> pointer will be returned here on success
+ * alignment -> Value to which the allocation must be aligned.  This
+ * should probably be a multiple of 2 with a maximum value equivalent
+ * to the block-size which is often 1k or 4k.
+ *
+ * size -> Number of bytes requested.
+ */
+#undef posix_memalign
+int	posix_memalign(DMALLOC_PNT *memptr, DMALLOC_SIZE alignment, DMALLOC_SIZE size)
+{
+  char		*file;
+  GET_RET_ADDR(file);
+	return dmalloc_posix_memalign(file, DMALLOC_DEFAULT_LINE, memptr,
+			       size, DMALLOC_FUNC_POSIX_MEMALIGN, alignment,
+			       0);
+}
 /*
  * DMALLOC_PNT valloc
  *
@@ -1428,6 +1655,13 @@ DMALLOC_FREE_RET	cfree(DMALLOC_PNT pnt)
  */
 int	dmalloc_verify(const DMALLOC_PNT pnt)
 {
+	DMALLOC_PNT p;
+	p=_dmalloc_chunk_get_baseptr((DMALLOC_PNT)pnt);
+	return dmalloc_verify_real(p);
+}
+
+int	dmalloc_verify_real(const DMALLOC_PNT pnt)
+{
   int	ret;
   
   if (! dmalloc_in(DMALLOC_DEFAULT_FILE, DMALLOC_DEFAULT_LINE, 0)) {
@@ -1526,6 +1760,9 @@ int	dmalloc_verify_pnt_strsize(const char *file, const int line,
   if (! dmalloc_in(file, line, 0)) {
     return MALLOC_VERIFY_NOERROR;
   }
+
+  if(exact_b)/* we need the exact ptr... may weaken checks... */
+	  pnt=_dmalloc_chunk_get_baseptr((DMALLOC_PNT)pnt);
   
   /* call the pnt checking chunk code */
   ret = _dmalloc_chunk_pnt_check(func, pnt, exact_b, strlen_b, min_size);
@@ -1733,6 +1970,34 @@ void	dmalloc_debug_setup(const char *options_str)
  * otherwise no seen information is available and it will be set to 0.
  */
 int	dmalloc_examine(const DMALLOC_PNT pnt, DMALLOC_SIZE *user_size_p,
+			DMALLOC_SIZE *total_size_p, char **file_p,
+			unsigned int *line_p, DMALLOC_PNT *ret_attr_p,
+			unsigned long *used_mark_p, unsigned long *seen_p)
+{
+	DMALLOC_PNT p;
+	int rv;
+	DMALLOC_SIZE s,offs,u_s;
+	if(NULL!=user_size_p)
+		s=*user_size_p;
+	
+	p=_dmalloc_chunk_get_baseptr((DMALLOC_PNT)pnt);
+	rv=dmalloc_examine_real(p, &s,
+			total_size_p, file_p,line_p, ret_attr_p,used_mark_p, seen_p);
+	if(NULL!=p)
+	{
+		memmove(&offs,((char *)pnt)-sizeof(offs),sizeof(offs));
+		u_s=s-sizeof(offs)-offs;
+	}
+	else
+	{
+		u_s=s;
+	}
+	if(NULL!=user_size_p)
+		*user_size_p=u_s;
+	return rv;
+}
+
+int	dmalloc_examine_real(const DMALLOC_PNT pnt, DMALLOC_SIZE *user_size_p,
 			DMALLOC_SIZE *total_size_p, char **file_p,
 			unsigned int *line_p, DMALLOC_PNT *ret_attr_p,
 			unsigned long *used_mark_p, unsigned long *seen_p)

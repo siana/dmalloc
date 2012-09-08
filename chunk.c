@@ -2463,6 +2463,9 @@ void	*_dmalloc_chunk_malloc(const char *file, const unsigned int line,
     case DMALLOC_FUNC_MEMALIGN:
       trans_log = "memalign";
       break;
+    case DMALLOC_FUNC_POSIX_MEMALIGN:
+      trans_log = "posix_memalign";
+      break;
     case DMALLOC_FUNC_VALLOC:
       trans_log = "valloc";
       break;
@@ -3130,6 +3133,19 @@ void	_dmalloc_chunk_log_changed(const unsigned long mark,
   }
 }
 
+DMALLOC_PNT _dmalloc_chunk_get_baseptr(DMALLOC_PNT p)
+{
+	char * rv=p;
+	DMALLOC_SIZE offset=0;
+	if(NULL==p)
+		return NULL;
+	rv-=sizeof(offset);
+	memmove(&offset,rv,sizeof(offset));
+	rv-=offset;
+	return rv;
+}
+
+
 /*
  * unsigned long _dmalloc_chunk_count_changed
  *
@@ -3207,6 +3223,7 @@ unsigned long	_dmalloc_chunk_count_changed(const unsigned long mark,
       mem_count += slot_p->sa_user_size;
     }
     else if (count_freed_b && freed_b) {
+      char * a,*b;
       mem_count += slot_p->sa_user_size;
     }
   }
