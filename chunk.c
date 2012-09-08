@@ -1898,6 +1898,68 @@ int	_dmalloc_chunk_startup(void)
 }
 
 /*
+ * int _dmalloc_chunk_tag_pnt
+ *
+ * DESCRIPTION:
+ *
+ * Look for a specific address in the skip list.  If it exist 
+ * set the file and line fields to given value. Handy for tagging
+ * pointers from external libraries whithout dmalloc macros.
+ *
+ * RETURNS:
+ *
+ * Success - 1
+ *
+ * Failure - 0
+ *
+ * ARGUMENTS:
+ *
+ * user_pnt -> Address we are looking for.
+ *
+ * exact_b -> Set to 1 to find the exact pointer.  If 0 then the
+ * address could be inside a block.
+ *
+ * file -> should typically point to filename of source file. String is _not_
+ *         copied.
+ *
+ * line -> source file line number
+ *
+ */
+int _dmalloc_chunk_tag_pnt(const void * user_pnt,int exact_b,char *file,int line)
+{
+	skip_alloc_t *slot_p;
+  char * u_p=user_pnt;
+  
+  if (BIT_IS_SET(_dmalloc_flags, DEBUG_LOG_TRANS)) {
+    dmalloc_message("tagging pointer '%#lx'",
+		    (unsigned long)user_pnt);
+  }
+  
+  if(exact_b) {
+  /*
+  of course this may fail, if _dmalloc_flags is changed at certain points
+  */
+    if (BIT_IS_SET(_dmalloc_flags, DEBUG_CHECK_FENCE)) {
+      u_p-=FENCE_BOTTOM_SIZE;
+    }
+  }
+
+  /* find the pointer with loose checking for fence */
+  slot_p = find_address(u_p, 0 /* used list */, exact_b,
+			skip_update);
+  if (slot_p == NULL) {
+    dmalloc_errno = ERROR_NOT_FOUND;
+    log_error_info(NULL, 0, user_pnt, NULL, "finding address in heap", "_dmalloc_chunk_tag_pnt");
+    return 0;
+  }
+
+  slot_p->sa_file = file;
+  slot_p->sa_line = line;
+
+  return 1;
+}
+
+/*
  * char *_dmalloc_chunk_desc_pnt
  *
  * DESCRIPTION:

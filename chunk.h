@@ -55,6 +55,37 @@ extern
 int	_dmalloc_chunk_startup(void);
 
 /*
+ * int _dmalloc_chunk_tag_pnt
+ *
+ * DESCRIPTION:
+ *
+ * Look for a specific address in the skip list.  If it exist 
+ * set the file and line fields to given value. Handy for tagging
+ * pointers from external libraries whithout dmalloc macros.
+ *
+ * RETURNS:
+ *
+ * Success - 1
+ *
+ * Failure - 0
+ *
+ * ARGUMENTS:
+ *
+ * user_pnt -> Address we are looking for.
+ *
+ * exact_b -> Set to 1 to find the exact pointer.  If 0 then the
+ * address could be inside a block.
+ *
+ * file -> should typically point to filename of source file. String is _not_
+ *         copied.
+ *
+ * line -> source file line number
+ *
+ */
+extern
+int	_dmalloc_chunk_tag_pnt(const void * user_pnt,int exact_b,char *file,int line);
+ 
+/*
  * char *_dmalloc_chunk_desc_pnt
  *
  * DESCRIPTION:

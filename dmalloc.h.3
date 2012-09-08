@@ -612,6 +612,40 @@ int	dmalloc_verify_pnt_strsize(const char *file, const int line,
 				   const int min_size);
 
 /*
+ * int dmalloc_tag_pnt
+ *
+ * DESCRIPTION:
+ *
+ * Look for a specific address in the skip list.  If it exist 
+ * set the file and line fields to given value. Handy for tagging
+ * pointers from external libraries whithout dmalloc macros.
+ * Do _not_ use this function directly, use the dmalloc_tag #define instead.
+ * As it can be transparently disabled using DMALLOC_DISABLE.
+ *
+ * RETURNS:
+ *
+ * Success - 1
+ *
+ * Failure - 0
+ *
+ * ARGUMENTS:
+ *
+ * pnt -> Address we are looking for.
+ *
+ * file -> should typically point to filename of source file. String is _not_
+ *         copied.
+ *
+ * line -> source file line number
+ *
+ */
+extern
+int	dmalloc_tag_pnt(const DMALLOC_PNT pnt,char *file,int line);
+
+/* The other (real) one is further below. This one always succeeds */
+#define dmalloc_tag(p_,f_,l_) (1)
+
+
+/*
  * int dmalloc_verify_pnt
  *
  * DESCRIPTION:
@@ -1067,6 +1101,9 @@ const char	*dmalloc_strerror(const int error_num);
  */
 
 #ifndef DMALLOC_DISABLE
+
+#undef dmalloc_tag
+#define dmalloc_tag(p_,f_,l_) dmalloc_tag_pnt(p_,f_,l_)
 
 #undef malloc
 #define malloc(size) \

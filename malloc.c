@@ -2039,6 +2039,47 @@ int	dmalloc_examine_real(const DMALLOC_PNT pnt, DMALLOC_SIZE *user_size_p,
 }
 
 /*
+ * int dmalloc_tag_pnt
+ *
+ * DESCRIPTION:
+ *
+ * Look for a specific address in the skip list.  If it exist 
+ * set the file and line fields to given value. Handy for tagging
+ * pointers from external libraries whithout dmalloc macros.
+ * Do _not_ use this function directly, use the dmalloc_tag #define instead.
+ * As it can be transparently disabled using DMALLOC_DISABLE.
+ *
+ * RETURNS:
+ *
+ * Success - 1
+ *
+ * Failure - 0
+ *
+ * ARGUMENTS:
+ *
+ * pnt -> Address we are looking for.
+ *
+ * file -> should typically point to filename of source file. String is _not_
+ *         copied.
+ *
+ * line -> source file line number
+ *
+ */
+extern
+int	dmalloc_tag_pnt(const DMALLOC_PNT pnt,char *file,int line)
+{
+	DMALLOC_PNT p;
+	p=_dmalloc_chunk_get_baseptr((DMALLOC_PNT)pnt);
+	if (! dmalloc_in(DMALLOC_DEFAULT_FILE, DMALLOC_DEFAULT_LINE, 1)) {
+		return;
+	}
+	_dmalloc_chunk_tag_pnt(p,1,file,line);
+	dmalloc_out();
+
+}
+
+
+/*
  * void dmalloc_track
  *
  * DESCRIPTION:
