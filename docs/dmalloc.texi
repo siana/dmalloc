@@ -870,7 +870,7 @@ checking the heap after it sees a call from anywhere in the
 @cindex dmalloc.h file
 
 By including @file{dmalloc.h} in your C files, your calls to malloc,
-calloc, realloc, recalloc, memalign, valloc, strdup, and free are
+calloc, realloc, recalloc, memalign, posix_memalign, valloc, strdup, and free are
 replaced with calls to _dmalloc_malloc, _dmalloc_realloc, and
 _dmalloc_free with various flags.  Additionally the library replaces
 calls to xmalloc, xcalloc, xrealloc, xrecalloc, xmemalign, xvalloc,
@@ -890,6 +890,7 @@ This line from a log file shows that memory was not freed from file
 
 @cindex recalloc
 @cindex memalign
+@cindex posix_memalign
 @cindex valloc
 @cindex strdup
 
@@ -1247,6 +1248,18 @@ is good or not.
 
 @emph{NOTE}: This function is @emph{certainly} not provided by most if
 not all other malloc libraries.
+
+@end deftypefun
+
+@c --------------------------------
+
+@cindex dmalloc_tag function
+@cindex tag a pointer
+
+@deftypefun int dmalloc_tag ( const DMALLOC_PNT @var{pnt}, char *@var{file},int @var{line})
+
+This function sets a pointer's file and line information to the supplied values.
+@var{file} @emph{must} be a constant string, it is not copied.
 
 @end deftypefun
 
