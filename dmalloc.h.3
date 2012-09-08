@@ -429,6 +429,7 @@ char	*strdup(const char *string);
  *
  * len -> Length of the string to duplicate.
  */
+#undef strndup
 extern
 char	*strndup(const char *string, const DMALLOC_SIZE len);
 
