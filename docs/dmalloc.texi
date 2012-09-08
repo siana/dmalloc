@@ -1256,9 +1256,9 @@ not all other malloc libraries.
 @cindex dmalloc_tag function
 @cindex tag a pointer
 
-@deftypefun int dmalloc_tag ( const DMALLOC_PNT @var{pnt}, char *@var{file},int @var{line})
+@deftypefun int dmalloc_tag ( const DMALLOC_PNT @var{pnt}, char *@var{file}, int @var{line})
 
-This function sets a pointer's file and line information to the supplied values.
+This macro sets a pointer's file and line information to the supplied values.
 @var{file} @emph{must} be a constant string, it is not copied.
 
 @end deftypefun

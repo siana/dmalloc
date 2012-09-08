@@ -158,6 +158,7 @@ static	unsigned long	func_calloc_c = 0;	/* # callocs, done in alloc */
 static	unsigned long	func_realloc_c = 0;	/* count the reallocs */
 static	unsigned long	func_recalloc_c = 0;	/* count the reallocs */
 static	unsigned long	func_memalign_c = 0;	/* count the memaligns */
+static	unsigned long	func_posix_memalign_c = 0;	/* count the posix_memaligns */
 static	unsigned long	func_valloc_c = 0;	/* count the veallocs */
 static	unsigned long	func_new_c = 0;		/* count the news */
 static	unsigned long	func_free_c = 0;	/* count the frees */
@@ -741,6 +742,69 @@ static	skip_alloc_t	*insert_address(void *address, const int free_b,
   
   return new_p;
 }
+/************************** alignment utility functions *************************/
+
+/*
+currently(5.5.2-3) alignment looks like this:
+|FENCE|???|offs|USER|G|FENCE|
+
+what I want alignment to look like is:
+
+|???|offs|FENCE|USER|FENCE|G|
+                ^u_p
+
+...the fences should be right besides the user portion...
+addresses increasing from left to right
+??? is variable size depending on required alignment.
+in the worst case 
+offs is the size of the ??? portion.
+FENCE are the fence posts. they may not always be there.
+G is a variable-sized gap caused by alignment.
+USER is the user area. users get a u_p pointer pointing.
+to USER's base. this is also what free() etc get back 
+from user space.
+
+USER should be aligned to some alignment
+to find the base pointer for dmalloc (to free etc..)
+we have to go downward, skip the lower FENCE bytes(conditionally)
+skip sizeof offs, read the offs, skip the offs.
+Now to find out if the fence bytes are there and should be skipped,
+we fetch the slot pointer and examine the
+BIT_SET(slot_p->sa_flags, ALLOC_FLAG_FENCE);
+
+removed the offs altogether. alignment is stored in the lot
+and offset generated on-the-fly.
+*/
+
+/*calculate alignment overhead*/
+static unsigned int get_align_overhead(unsigned int align,int fence_b)
+{
+	unsigned int rv=0;
+	
+	if(align==0)
+		align=1;
+	if(fence_b)
+		rv=FENCE_OVERHEAD_SIZE;
+	
+	return rv+align-1;//sizes of fence + alignment overhead 
+}
+
+/*just tests if the remainder is zero*/
+static int is_aligned_to(char * p, unsigned int alignment)
+{
+	return 0==(((unsigned int)p)%alignment);//alignment must not be zero
+}
+
+/*advance the pointer bytewise until it is aligned. returns result*/
+static char * align_to(char * p, unsigned int alignment)
+{
+	/*byte addressable?*/
+	while(! is_aligned_to(p,(alignment==0)?1:alignment))
+	{
+		p++;
+	}
+	return p;
+}
 
 /******************************* misc routines *******************************/
 
@@ -847,28 +911,22 @@ static	int	expand_chars(const void *buf, const int buf_size,
 static	void	get_pnt_info(const skip_alloc_t *slot_p, pnt_info_t *info_p)
 {
   info_p->pi_fence_b = BIT_IS_SET(slot_p->sa_flags, ALLOC_FLAG_FENCE);
-  info_p->pi_valloc_b = BIT_IS_SET(slot_p->sa_flags, ALLOC_FLAG_VALLOC);
   info_p->pi_blanked_b = BIT_IS_SET(slot_p->sa_flags, ALLOC_FLAG_BLANK);
   
   info_p->pi_alloc_start = slot_p->sa_mem;
   
   if (info_p->pi_fence_b) {
-    if (info_p->pi_valloc_b) {
-      info_p->pi_user_start = (char *)info_p->pi_alloc_start + BLOCK_SIZE;
-      info_p->pi_fence_bottom = (char *)info_p->pi_user_start -
-	FENCE_BOTTOM_SIZE;
-    }
-    else {
-      info_p->pi_fence_bottom = info_p->pi_alloc_start;
-      info_p->pi_user_start = (char *)info_p->pi_alloc_start +
-	FENCE_BOTTOM_SIZE;
-    }
+    char * a_p;
+    a_p=align_to((char *)info_p->pi_alloc_start +FENCE_BOTTOM_SIZE,slot_p->sa_align);
+    info_p->pi_fence_bottom = a_p-FENCE_BOTTOM_SIZE;//the fence is directly before user_start
+    info_p->pi_user_start = a_p;
   }
   else {
     info_p->pi_fence_bottom = NULL;
-    info_p->pi_user_start = info_p->pi_alloc_start;
+    info_p->pi_user_start = align_to((char *)info_p->pi_alloc_start,slot_p->sa_align);
   }
   
+  info_p->pi_align=slot_p->sa_align;
   info_p->pi_user_bounds = (char *)info_p->pi_user_start +
     slot_p->sa_user_size;
   
@@ -876,7 +934,7 @@ static	void	get_pnt_info(const skip_alloc_t *slot_p, pnt_info_t *info_p)
   
   if (info_p->pi_fence_b) {
     info_p->pi_fence_top = info_p->pi_user_bounds;
-    info_p->pi_upper_bounds = (char *)info_p->pi_alloc_bounds - FENCE_TOP_SIZE;
+    info_p->pi_upper_bounds = (char *)info_p->pi_fence_top;
   }
   else {
     info_p->pi_fence_top = NULL;
@@ -1125,9 +1183,13 @@ static	void	log_error_info(const char *now_file,
   }
   
   /* find the previous pointer in case it ran over */
-  if (dmalloc_errno == ERROR_UNDER_FENCE && start_user != NULL) {
-    other_p = find_address((char *)start_user - FENCE_BOTTOM_SIZE - 1,
-			   0 /* used list */, 1 /* not exact pointer */,
+  if (dmalloc_errno == ERROR_UNDER_FENCE && start_user != NULL
+     && slot_p != NULL) {
+  /* argh.. without slot_p I cannot find the prev ptr precisely. this is now wrong. */
+    other_p = find_address((char *)slot_p->sa_mem-1,
+    //(char *)start_user - FENCE_BOTTOM_SIZE - 1, how can this have worked? It points to the last byte of prev block, but he's looking for exact base ptr match.
+//			   0 /* used list */, 1 /* exact pointer */,
+			   0 /* used list */, 0 /* not exact pointer */,
 			   skip_update);
     if (other_p != NULL) {
       dmalloc_message("  prev pointer '%#lx' (size %u) may have run over from '%s'",
@@ -1142,7 +1204,7 @@ static	void	log_error_info(const char *now_file,
 	   && start_user != NULL
 	   && slot_p != NULL) {
     other_p = find_address((char *)slot_p->sa_mem + slot_p->sa_total_size,
-			   0 /* used list */, 1 /* not exact pointer */,
+			   0 /* used list */, 1 /* exact pointer */,
 			   skip_update);
     if (other_p != NULL) {
       dmalloc_message("  next pointer '%#lx' (size %u) may have run under from '%s'",
@@ -1650,36 +1712,22 @@ static	int	check_used_slot(const skip_alloc_t *slot_p,
   }
   
   /*
-   * If we have a valloc allocation then the _user_ pnt should be
-   * block aligned otherwise the chunk_pnt should be.
-   */
-  if (pnt_info.pi_valloc_b) {
-    
-    if ((long)pnt_info.pi_user_start % BLOCK_SIZE != 0) {
-      dmalloc_errno = ERROR_NOT_ON_BLOCK;
-      return 0;
-    }
-    if (slot_p->sa_total_size < BLOCK_SIZE) {
+  check that the contents does not exceed allocated size
+  */
+
+  if (pnt_info.pi_fence_b) {
+    if((pnt_info.pi_fence_top+FENCE_TOP_SIZE)>pnt_info.pi_alloc_bounds) {
       dmalloc_errno = ERROR_SLOT_CORRUPT;
       return 0;
     }
-    
-    /* now check the below space to make sure it is still clear */
-    if (pnt_info.pi_fence_b && pnt_info.pi_blanked_b) {
-      num = (char *)pnt_info.pi_fence_bottom - (char *)pnt_info.pi_alloc_start;
-      if (num > 0) {
-	for (mem_p = pnt_info.pi_alloc_start;
-	     mem_p < (char *)pnt_info.pi_fence_bottom;
-	     mem_p++) {
-	  if (*mem_p != ALLOC_BLANK_CHAR) {
-	    dmalloc_errno = ERROR_FREE_OVERWRITTEN;
-	    return 0;
-	  }
-	}
-      }
+  }
+  else {
+    if(pnt_info.pi_user_bounds>pnt_info.pi_alloc_bounds) {
+      dmalloc_errno = ERROR_SLOT_CORRUPT;
+      return 0;
     }
   }
-  
+
   /* check out the fence-posts */
   if (pnt_info.pi_fence_b && (! fence_read(&pnt_info))) {
     /* errno set in fence_read */
@@ -1916,36 +1964,23 @@ int	_dmalloc_chunk_startup(void)
  *
  * user_pnt -> Address we are looking for.
  *
- * exact_b -> Set to 1 to find the exact pointer.  If 0 then the
- * address could be inside a block.
- *
  * file -> should typically point to filename of source file. String is _not_
  *         copied.
  *
  * line -> source file line number
  *
  */
-int _dmalloc_chunk_tag_pnt(const void * user_pnt,int exact_b,char *file,int line)
+int _dmalloc_chunk_tag_pnt(const void * user_pnt,char *file,int line)
 {
-	skip_alloc_t *slot_p;
-  char * u_p=user_pnt;
+  skip_alloc_t *slot_p;
   
   if (BIT_IS_SET(_dmalloc_flags, DEBUG_LOG_TRANS)) {
     dmalloc_message("tagging pointer '%#lx'",
 		    (unsigned long)user_pnt);
   }
   
-  if(exact_b) {
-  /*
-  of course this may fail, if _dmalloc_flags is changed at certain points
-  */
-    if (BIT_IS_SET(_dmalloc_flags, DEBUG_CHECK_FENCE)) {
-      u_p-=FENCE_BOTTOM_SIZE;
-    }
-  }
-
   /* find the pointer with loose checking for fence */
-  slot_p = find_address(u_p, 0 /* used list */, exact_b,
+  slot_p = find_address(user_pnt, 0 /* used list */, 0/* it would not work.. */,
 			skip_update);
   if (slot_p == NULL) {
     dmalloc_errno = ERROR_NOT_FOUND;
@@ -2102,7 +2137,7 @@ int	_dmalloc_chunk_read_info(const void *user_pnt, const char *where,
   SET_POINTER(seen_cp, NULL);
 #endif
   SET_POINTER(used_p, slot_p->sa_use_iter);
-  SET_POINTER(valloc_bp, BIT_IS_SET(slot_p->sa_flags, ALLOC_FLAG_VALLOC));
+  SET_POINTER(valloc_bp, 0);//BIT_IS_SET(slot_p->sa_flags, ALLOC_FLAG_VALLOC));
   SET_POINTER(fence_bp, BIT_IS_SET(slot_p->sa_flags, ALLOC_FLAG_FENCE));
   
   return 1;
@@ -2367,6 +2402,7 @@ int	_dmalloc_chunk_pnt_check(const char *func, const void *user_pnt,
   return 1;
 }
 
+
 /************************** low-level user functions *************************/
 
 /*
@@ -2400,23 +2436,27 @@ void	*_dmalloc_chunk_malloc(const char *file, const unsigned int line,
 			       const unsigned int alignment)
 {
   unsigned long	needed_size;
-  int		valloc_b = 0, memalign_b = 0, fence_b = 0;
+  int		fence_b = 0;
   char		where_buf[MAX_FILE_LENGTH + 64], disp_buf[64];
   skip_alloc_t	*slot_p;
   pnt_info_t	pnt_info;
   const char	*trans_log;
+  unsigned int align=alignment;
+  if(0==alignment)
+    align=1;
   
   /* counts calls to malloc */
   if (func_id == DMALLOC_FUNC_CALLOC) {
     func_calloc_c++;
   }
-  else if (alignment == BLOCK_SIZE) {
-    func_valloc_c++;
-    valloc_b = 1;
+  else if (func_id == DMALLOC_FUNC_POSIX_MEMALIGN) {
+    func_posix_memalign_c++;
   }
-  else if (alignment > 0) {
+  else if (func_id == DMALLOC_FUNC_VALLOC) {
+    func_valloc_c++;
+  }
+  else if (func_id == DMALLOC_FUNC_MEMALIGN) {
     func_memalign_c++;
-    memalign_b = 1;
   }
   else if (func_id == DMALLOC_FUNC_NEW) {
     func_new_c++;
@@ -2444,30 +2484,7 @@ void	*_dmalloc_chunk_malloc(const char *file, const unsigned int line,
   }
 #endif
   
-  needed_size = size;
-  
-  /* adjust the size */
-  if (BIT_IS_SET(_dmalloc_flags, DEBUG_CHECK_FENCE)) {
-    needed_size += FENCE_OVERHEAD_SIZE;
-    fence_b = 1;
-    
-    /*
-     * If the user is requesting a page-aligned block of data then we
-     * will need another block below the allocation just for the fence
-     * information.  Ugh.
-     */
-    if (valloc_b) {
-      needed_size += BLOCK_SIZE;
-    }
-  }
-  else if (valloc_b && needed_size <= BLOCK_SIZE / 2) {
-    /*
-     * If we are valloc-ing, make sure that we get a blocksized chunk
-     * because they are always block aligned.  We know here that fence
-     * posting is not on otherwise it would have been set above.
-     */
-    needed_size = BLOCK_SIZE;
-  }
+  needed_size=get_align_overhead(align,fence_b=BIT_IS_SET(_dmalloc_flags, DEBUG_CHECK_FENCE))+size;
   
   /* get some space for our memory */
   slot_p = get_memory(needed_size);
@@ -2478,10 +2495,8 @@ void	*_dmalloc_chunk_malloc(const char *file, const unsigned int line,
   if (fence_b) {
     BIT_SET(slot_p->sa_flags, ALLOC_FLAG_FENCE);
   }
-  if (valloc_b) {
-    BIT_SET(slot_p->sa_flags, ALLOC_FLAG_VALLOC);
-  }
-  slot_p->sa_user_size = size;
+  slot_p->sa_user_size = size;//this is different... just the user size. excludes alignment overhead. where is it used.. do I need additional info?
+  slot_p->sa_align = align;//that should do...
   
   /* initialize the bblocks */
   alloc_cur_given += slot_p->sa_total_size;
@@ -2807,7 +2822,9 @@ void	*_dmalloc_chunk_realloc(const char *file, const unsigned int line,
   pnt_info_t	pnt_info;
   void		*new_user_pnt;
   unsigned int	old_size, old_line;
-  
+  char		where_buf[MAX_FILE_LENGTH + 64];
+  char		where_buf2[MAX_FILE_LENGTH + 64];
+
   /* counts calls to realloc */
   if (func_id == DMALLOC_FUNC_RECALLOC) {
     func_recalloc_c++;
@@ -2842,6 +2859,13 @@ void	*_dmalloc_chunk_realloc(const char *file, const unsigned int line,
 		   "realloc");
     return 0;
   }
+  
+  if(slot_p->sa_align!=1)
+    dmalloc_message("WARNING: reallocating aligned ptr from '%s' at '%s'",
+		    _dmalloc_chunk_desc_pnt(where_buf, sizeof(where_buf),
+					    slot_p->sa_file, slot_p->sa_line),
+		    _dmalloc_chunk_desc_pnt(where_buf2, sizeof(where_buf),
+					    file, line));
   
   /* get info about the pointer */
   get_pnt_info(slot_p, &pnt_info);
@@ -3000,8 +3024,8 @@ void	_dmalloc_chunk_log_stats(void)
   /* log user allocation information */
   dmalloc_message("alloc calls: malloc %lu, calloc %lu, realloc %lu, free %lu",
 		  func_malloc_c, func_calloc_c, func_realloc_c, func_free_c);
-  dmalloc_message("alloc calls: recalloc %lu, memalign %lu, valloc %lu",
-		  func_recalloc_c, func_memalign_c, func_valloc_c);
+  dmalloc_message("alloc calls: recalloc %lu, memalign %lu, posix_memalign %lu, valloc %lu",
+		  func_recalloc_c, func_memalign_c, func_posix_memalign_c, func_valloc_c);
   dmalloc_message("alloc calls: new %lu, delete %lu",
 		  func_new_c, func_delete_c);
   dmalloc_message("  current memory in use: %lu bytes (%lu pnts)",
@@ -3193,18 +3217,6 @@ void	_dmalloc_chunk_log_changed(const unsigned long mark,
 		      unknown_size_c);
     }
   }
-}
-
-DMALLOC_PNT _dmalloc_chunk_get_baseptr(DMALLOC_PNT p)
-{
-	char * rv=p;
-	DMALLOC_SIZE offset=0;
-	if(NULL==p)
-		return NULL;
-	rv-=sizeof(offset);
-	memmove(&offset,rv,sizeof(offset));
-	rv-=offset;
-	return rv;
 }
 
 

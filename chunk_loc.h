@@ -75,7 +75,6 @@
 #define ALLOC_FLAG_ADMIN	BIT_FLAG(3)	/* administrative space */
 #define ALLOC_FLAG_BLANK	BIT_FLAG(4)	/* slot has been blanked */
 #define ALLOC_FLAG_FENCE	BIT_FLAG(5)	/* slot is fence posted */
-#define ALLOC_FLAG_VALLOC	BIT_FLAG(6)	/* slot is block aligned */
 
 /*
  * Below defines an allocation structure either on the free or used
@@ -91,8 +90,9 @@ typedef struct skip_alloc_st {
   unsigned char		sa_level_n;	/* how tall our node is */
   unsigned short	sa_line;	/* line where it was allocated */
   
-  unsigned int		sa_user_size;	/* size requested by user (wo fence) */
+  unsigned int		sa_user_size;	/* size requested by user (wo fence or align) */
   unsigned int		sa_total_size;	/* total size of the block */
+  unsigned int		sa_align;	/* alignment of user portion */
   
   void			*sa_mem;	/* pointer to the memory in question */
   const char		*sa_file;	/* .c filename where allocated */
@@ -112,7 +112,7 @@ typedef struct skip_alloc_st {
 #endif
 #endif
 #if LOG_PNT_THREAD_ID
-  THREAD_TYPE		sa_thread_id;	/* thread id which allocaed pnt */
+  THREAD_TYPE		sa_thread_id;	/* thread id which allocated pnt */
 #endif
   
   /*
@@ -166,7 +166,7 @@ typedef struct entry_block_st {
  */
 typedef struct {
   int		pi_fence_b;		/* fence-posts are on for pointer */
-  int		pi_valloc_b;		/* pointer is valloc-aligned */
+//  int		pi_valloc_b;		/* pointer is valloc-aligned */
   int		pi_blanked_b;		/* pointer was blanked */
   void		*pi_alloc_start;	/* pnt to start of allocation */
   void		*pi_fence_bottom;	/* pnt to the bottom fence area */
@@ -175,6 +175,8 @@ typedef struct {
   void		*pi_fence_top;		/* pnt to the top fence area */
   void		*pi_upper_bounds;	/* pnt to highest available user area*/
   void		*pi_alloc_bounds;	/* pnt past end of total allocation */
+  unsigned int	pi_align;		/* alignment */
 } pnt_info_t;
+
 
 #endif /* ! __CHUNK_LOC_H__ */

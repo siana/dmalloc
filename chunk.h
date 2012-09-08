@@ -73,9 +73,6 @@ int	_dmalloc_chunk_startup(void);
  *
  * user_pnt -> Address we are looking for.
  *
- * exact_b -> Set to 1 to find the exact pointer.  If 0 then the
- * address could be inside a block.
- *
  * file -> should typically point to filename of source file. String is _not_
  *         copied.
  *
@@ -83,7 +80,7 @@ int	_dmalloc_chunk_startup(void);
  *
  */
 extern
-int	_dmalloc_chunk_tag_pnt(const void * user_pnt,int exact_b,char *file,int line);
+int	_dmalloc_chunk_tag_pnt(const void * user_pnt, char *file, int line);
  
 /*
  * char *_dmalloc_chunk_desc_pnt
