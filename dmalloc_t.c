@@ -1813,13 +1813,13 @@ static	int	check_special(void)
 #endif
     
     /* now test the dmalloc_free function */
-    if (dmalloc_free(__FILE__, __LINE__, NULL,
+    /*if (dmalloc_free(__FILE__, __LINE__, NULL,
 		     DMALLOC_FUNC_FREE) != FREE_ERROR) {
       if (! silent_b) {
 	(void)printf("   ERROR: free of NULL should have failed.\n");
       }
       final = 0;
-    }
+    }*/
     
     dmalloc_errno = errno_hold;
   }
